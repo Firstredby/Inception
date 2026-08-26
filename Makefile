@@ -11,7 +11,10 @@ SECRETS = \
 all: check-secrets
 	mkdir -p $(DATA_DIR)/mariadb
 	mkdir -p $(DATA_DIR)/wordpress
-	$(COMPOSE) up --build
+	$(COMPOSE) up -d --build
+
+logs:
+	$(COMPOSE) logs
 
 check-secrets:
 	@for secret in $(SECRETS); do \
@@ -29,13 +32,18 @@ check-secrets:
 		fi; \
 	done
 
+up:
+	$(COMPOSE) up
+
 down:
 	$(COMPOSE) down
 
 clean:
-	$(COMPOSE) down -v
+	$(COMPOSE) down
+	docker ps -aq | xargs -r docker rm -f
+	docker images -aq | xargs -r docker rmi -f
 	@if [ -d $(DATA_DIR) ]; then \
-		sudo chown -R $(USER):$(USER) $(DATA_DIR); \
+		sudo chown -R $(USER):$(USER) $(DATA_DIR) 2>/dev/null; \
 	fi
 
 fclean: clean
@@ -43,4 +51,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all check-secrets down clean fclean re
+.PHONY: all logs check-secrets up down clean fclean re
