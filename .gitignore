@@ -1,2 +1,7 @@
 #ignore passwords
 secrets/
+
+.env
+.env.*
+./src/.env
+./src/.env.*
