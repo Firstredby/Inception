@@ -17,20 +17,19 @@ logs:
 	$(COMPOSE) logs
 
 check-secrets:
-	@for secret in $(SECRETS); do \
-		if [ ! -f $$secret ]; then \
-			echo "ERROR: Required secrets are missing." \
-			echo "" \
-			echo "Expected files:" \
-			echo "  secrets/db_password.txt" \
-			echo "  secrets/db_root_password.txt" \
-			echo "  secrets/wp_admin_password.txt" \
-			echo "  secrets/wp_user_password.txt" \
-			echo "" \
-			echo "Aborting..." \
-			exit 1; \
-		fi; \
-	done
+	@missing=""; \
+	for secret in $(SECRETS); do \
+		[ -f "$$secret" ] || missing="$$missing $$secret"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "ERROR: required secret files are missing:"; \
+		echo ""; \
+		for m in $$missing; do echo "  $$m"; done; \
+		echo ""; \
+		echo "Create each one with:  echo 'password' > <file>"; \
+		echo "Aborting."; \
+		exit 1; \
+	fi
 
 up:
 	$(COMPOSE) up
