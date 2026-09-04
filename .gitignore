@@ -2,4 +2,4 @@
 secrets/
 
 .env
-./src/.env
+./srcs/.env
