@@ -39,7 +39,7 @@ services:
         
 
     mariadb:
-        build: ./requirements/mariadb`
+        build: ./requirements/mariadb
         container_name: mariadb
         restart: on-failure
         volumes:
