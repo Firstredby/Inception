@@ -18,7 +18,7 @@ logs:
 check-secrets:
 	@missing=""; \
 	for secret in $(SECRETS); do \
-		[ -f "$$secret" ] || missing="$$missing $$secret"; \
+		[ -s "$$secret" ] || missing="$$missing $$secret"; \
 	done; \
 	if [ -n "$$missing" ]; then \
 		echo "ERROR: required secret files are missing:"; \
