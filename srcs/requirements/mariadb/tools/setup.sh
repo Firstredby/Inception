@@ -13,7 +13,6 @@ failure() { echo -e "${ERR}[FAIL]${RST} $1"; exit 1; }
 RUNTIME="/run/mysqld"
 DATADIR="/var/lib/mysql"
 
-MYSQL_ROOT_PASSWORD=$(cat /run/secrets/db_root_password)
 MYSQL_PASSWORD=$(cat /run/secrets/db_password)
 
 info "Preparing runtime..."
