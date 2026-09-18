@@ -40,4 +40,4 @@ wp --allow-root user create \
     --role=author
 fi
 
-exec php-fpm7.4 -F
+exec "$(find /usr/sbin -maxdepth 1 -name 'php-fpm*' -type f -executable | head -n 1)" -F
