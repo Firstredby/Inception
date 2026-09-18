@@ -90,14 +90,16 @@ check-env:
 	fi
 
 clean:
-	$(COMPOSE) down
-	docker ps -aq | xargs -r docker rm -f
-	docker images -aq | xargs -r docker rmi -f
+	$(COMPOSE) down --rmi all --remove-orphans
 	@if [ -d $(DATA_DIR) ]; then \
-		sudo chown -R $(USER):$(USER) $(DATA_DIR) 2>/dev/null; \
+		sudo chown -R $(USER):$(USER) $(DATA_DIR) 2>/dev/null || true; \
 	fi
 
-fclean: clean
+fclean:
+	$(COMPOSE) down --rmi all --volumes --remove-orphans
+	@if [ -d $(DATA_DIR) ]; then \
+		sudo chown -R $(USER):$(USER) $(DATA_DIR) 2>/dev/null || true; \
+	fi
 	rm -rf $(DATA_DIR)
 
 re: fclean all
