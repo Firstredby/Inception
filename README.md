@@ -10,9 +10,9 @@ The result is a WordPress site reachable only over TLS, split across three conta
 
 | Container   | Service                                   | Base image        | Reachable from |
 |-------------|-------------------------------------------|-------------------|----------------|
-| `nginx`     | TLS termination and reverse proxy         | `debian:bullseye` | the host, on port `443` |
-| `wordpress` | WordPress with php-fpm 7.4, set up by wp-cli | `debian:bullseye` | the internal network only |
-| `mariadb`   | Database                                  | `debian:bullseye` | the internal network only |
+| `nginx`     | TLS termination and reverse proxy         | `debian:bookworm` | the host, on port `443` |
+| `wordpress` | WordPress with php-fpm, set up by wp-cli  | `debian:bookworm` | the internal network only |
+| `mariadb`   | Database                                  | `debian:bookworm` | the internal network only |
 
 The three containers are joined by one user-defined Docker network, share two persistent volumes on the host, and receive their passwords through Docker secrets rather than through the environment. Everything is orchestrated by a single `docker-compose.yml` driven from a `Makefile`.
 
@@ -24,7 +24,7 @@ The three containers are joined by one user-defined Docker network, share two pe
 
 Docker is what makes the "one service per container" requirement expressible at all. Each service gets its own filesystem, its own process tree and its own network identity, while all three still share a single kernel and start in seconds. In practice Docker is used here in four distinct ways:
 
-1. **Images as build recipes.** Each service has a `dockerfile` that starts from `debian:bullseye` and installs, configures and prepares exactly one daemon. No image is pulled ready-made from DockerHub — only the Debian base is, which the subject allows.
+1. **Images as build recipes.** Each service has a `dockerfile` that starts from `debian:bookworm` and installs, configures and prepares exactly one daemon. No image is pulled ready-made from DockerHub — only the Debian base is, which the subject allows.
 2. **Compose as the orchestrator.** `docker-compose.yml` declares the three services, the network they share, the two volumes, and the three secrets. It also encodes start-up order through `depends_on`.
 3. **The network as an isolation boundary.** Only nginx publishes a port. MariaDB and php-fpm are addressable by service name from inside the network, and by nothing from outside it.
 4. **Volumes for state.** Container filesystems are disposable; the database and the WordPress installation are not, so both live on the host and are mounted in.
@@ -48,11 +48,11 @@ Docker is what makes the "one service per container" requirement expressible at 
     ├── docker-compose.yml         # services, network, volumes, secrets
     └── requirements/
         ├── nginx/
-        │   ├── dockerfile         # nginx + openssl on Debian bullseye
+        │   ├── dockerfile         # nginx + openssl on Debian bookworm
         │   ├── conf/nginx.conf    # one TLS vhost, FastCGI pass to php-fpm
         │   └── tools/create_cert.sh   # self-signed certificate, generated at build time
         ├── wordpress/
-        │   ├── dockerfile         # php7.4-fpm, WordPress tarball, wp-cli
+        │   ├── dockerfile         # php-fpm, WordPress tarball, wp-cli
         │   └── tools/init.sh      # waits for the DB, installs WP, execs php-fpm
         └── mariadb/
             ├── dockerfile         # mariadb-server, bind-address patched with sed
@@ -69,9 +69,11 @@ Docker is what makes the "one service per container" requirement expressible at 
 
 ### Main design choices
 
-**Debian bullseye as the base.** The subject asks for the penultimate stable release of Alpine or Debian. Bullseye is Debian 11, one release behind Bookworm. Debian was chosen over Alpine because its packaged `mariadb-server` and `php7.4-fpm` need no extra work, and because glibc avoids the musl surprises Alpine occasionally produces with PHP extensions.
+**Debian bookworm as the base.** The subject asks for the penultimate stable release of Alpine or Debian. Since Debian 13 "trixie" became stable in August 2025, bookworm (Debian 12) is the oldstable release and therefore the penultimate one; bullseye is now oldoldstable and too old to qualify. Debian was chosen over Alpine because its packaged `mariadb-server` and `php-fpm` need no extra work, and because glibc avoids the musl surprises Alpine occasionally produces with PHP extensions.
 
-**One long-lived process per container, and it is PID 1.** Two of the three services run a shell script as their entrypoint, and both scripts end with `exec` — `exec php-fpm7.4 -F` and `exec mariadbd --user=mysql`. The shell replaces itself with the daemon rather than forking it, so the daemon inherits PID 1. nginx needs no script at all: `CMD ["nginx", "-g", "daemon off;"]` is the JSON exec form, which runs the binary directly without a shell in between, and `daemon off` stops nginx backgrounding itself. In all three cases the service is PID 1, receives `SIGTERM` from `docker stop` and shuts down cleanly. There is no `tail -f`, no `sleep infinity`, no `while true`. The container's liveness is the service's liveness, which is exactly the point of the rule.
+**Nothing is pinned to a PHP version.** The WordPress image installs the unversioned `php`, `php-fpm` and `php-mysql` metapackages, so it gets whatever PHP the base release ships — 8.2 on bookworm. The two places that would normally hardcode a version do not: the `sed` that sets the FastCGI port targets `/etc/php/*/fpm/pool.d/www.conf` through a glob, and `init.sh` locates the daemon at run time with `find /usr/sbin -maxdepth 1 -name 'php-fpm*' -type f -executable`. Changing the Debian base therefore requires editing one line — the `FROM` — rather than hunting version numbers through three files.
+
+**One long-lived process per container, and it is PID 1.** Two of the three services run a shell script as their entrypoint, and both scripts end with `exec` — the php-fpm binary found at run time, and `exec mariadbd --user=mysql`. The shell replaces itself with the daemon rather than forking it, so the daemon inherits PID 1. nginx needs no script at all: `CMD ["nginx", "-g", "daemon off;"]` is the JSON exec form, which runs the binary directly without a shell in between, and `daemon off` stops nginx backgrounding itself. In all three cases the service is PID 1, receives `SIGTERM` from `docker stop` and shuts down cleanly. There is no `tail -f`, no `sleep infinity`, no `while true`. The container's liveness is the service's liveness, which is exactly the point of the rule.
 
 **`restart: on-failure` rather than `restart: always`.** A container that crashes comes back; a container whose entrypoint exits cleanly stays down and is visible as a problem. `always` would resurrect a broken entrypoint forever and hide precisely the failure mode the "no hacky loop" rule is meant to expose.
 

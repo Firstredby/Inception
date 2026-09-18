@@ -384,7 +384,17 @@ Only nginx publishes a port. MariaDB and php-fpm are reachable from inside `ince
 
 **nginx.** The dockerfile installs nginx and openssl, copies the config, and runs `create_cert.sh` at *build* time to generate a 2048-bit RSA self-signed certificate with `CN=ishchyro.42.fr`, valid a year. `CMD ["nginx", "-g", "daemon off;"]` keeps nginx in the foreground. TLSv1.2 and TLSv1.3 only.
 
-**wordpress.** The dockerfile installs `php7.4-fpm` and friends, downloads WordPress and wp-cli, replaces the default Unix socket with `listen = 9000` in `www.conf` (nginx talks to it over TCP across the container boundary), and symlinks `sendmail` to `/bin/true` to silence wp-cli's mail errors. At run time `init.sh` reads its three secrets, downloads WordPress only if `/var/www/html/wp-admin` is absent (normally it is not — see section 9), blocks until `mariadb -h "$DB_HOST" ... -e "SELECT 1;"` succeeds, runs `wp config create`, `wp core install` and `wp user create`, then `exec php-fpm7.4 -F`. The install block is guarded by `if [ ! -f wp-config.php ]`, so a restart does not reinstall over an existing site.
+**wordpress.** The dockerfile installs the unversioned `php`, `php-fpm` and `php-mysql` packages — so the PHP version is whatever the base release ships, 8.2 on bookworm — plus `curl` and `mariadb-client`. It then downloads WordPress and wp-cli, replaces the default Unix socket with `listen = 9000` (nginx talks to php-fpm over TCP across the container boundary), and symlinks `sendmail` to `/bin/true` to silence wp-cli's mail errors. The `sed` that sets the port targets `/etc/php/*/fpm/pool.d/www.conf` through a glob rather than a fixed version directory.
+
+`ENTRYPOINT ["/init.sh"]` runs the script in JSON exec form, so no shell sits between Docker and it. At run time `init.sh` reads its three secrets, creates `/run/php` for `www-data`, downloads WordPress only if `/var/www/html/wp-admin` is absent (normally it is not — see section 9), blocks until `mariadb -h "$DB_HOST" ... -e "SELECT 1;"` succeeds, then runs `wp config create`, `wp core install` and `wp user create`. The install block is guarded by `if [ ! -f wp-config.php ]`, so a restart does not reinstall over an existing site.
+
+The last line locates the daemon instead of naming it:
+
+```bash
+exec "$(find /usr/sbin -maxdepth 1 -name 'php-fpm*' -type f -executable | head -n 1)" -F
+```
+
+Debian names the binary after the version — `php-fpm8.2` on bookworm — so the `find` is what keeps the script working across base releases. `-F` keeps php-fpm in the foreground; without it the daemon would fork away and the container would exit.
 
 **mariadb.** The dockerfile installs server and client and patches `bind-address` in the packaged `/etc/mysql/mariadb.conf.d/50-server.cnf`. At run time `setup.sh` prepares `/run/mysqld`, and if `/var/lib/mysql/$MYSQL_DATABASE` does not exist it treats this as a first launch: it starts a temporary `mariadbd` with `--skip-networking` on a local socket, waits for it to answer, creates the database and the application user, shuts it down cleanly with `mariadb-admin shutdown`, and only then `exec`s the real server. The half-configured database is never reachable over the network. On later launches the whole block is skipped.
 
@@ -396,7 +406,7 @@ All three use `restart: on-failure`. A crashed container comes back; one whose e
 
 ### Why the service is always PID 1
 
-`wordpress` and `mariadb` run a shell script as their entrypoint, and both scripts end with `exec` — `exec php-fpm7.4 -F`, `exec mariadbd --user=mysql`. Without it the shell would stay alive as PID 1 with the daemon as its child, and `docker stop` would signal the shell rather than the service.
+`wordpress` and `mariadb` run a shell script as their entrypoint, and both scripts end with `exec` — the php-fpm binary that `init.sh` locates at run time, and `exec mariadbd --user=mysql`. Without it the shell would stay alive as PID 1 with the daemon as its child, and `docker stop` would signal the shell rather than the service. Both are declared in JSON exec form (`ENTRYPOINT ["/init.sh"]`), so Docker runs the script directly rather than wrapping it in `sh -c`.
 
 nginx has no script. `CMD ["nginx", "-g", "daemon off;"]` is the JSON exec form, so Docker runs the binary directly with no shell in between; `daemon off` prevents nginx from forking into the background and exiting.
 
@@ -410,7 +420,7 @@ The result is the same in all three: the service is PID 1, receives `SIGTERM` fr
 |---|---|
 | Domain / login | `nginx.conf` (`server_name`), `create_cert.sh` (`-subj`), `init.sh` (`--url`) |
 | Site title | `init.sh`, `wp core install --title` |
-| PHP version | `wordpress/dockerfile` (package names and the `www.conf` path) **and** `init.sh` (`exec php-fpm7.4 -F`) — all three carry `7.4` |
+| PHP version | Nothing to change — the packages are unversioned, the `www.conf` path is a glob, and `init.sh` finds the binary at run time. The version follows the Debian base |
 | Debian base | all three dockerfiles' `FROM` |
 | TLS settings | `nginx.conf`, `ssl_protocols` |
 | Certificate lifetime / key size | `create_cert.sh`, `-days` and `-newkey` |
@@ -439,7 +449,14 @@ Changes to `init.sh` and `setup.sh` only take effect on a rebuild, since both ar
 
 **WordPress loops on `Waiting for MariaDB...`.** Either `DB_USER`/`DB_NAME` do not match `MYSQL_USER`/`MYSQL_DATABASE`, or `db_password.txt` is not the password the database was initialized with. MariaDB creates the database and user on the *very first* launch only — if you edited `.env` or a secret afterwards, the old data directory still holds the old credentials. `make fclean && make` starts clean, at the cost of all content.
 
-**`502 Bad Gateway`.** php-fpm is not answering on `wordpress:9000`. Check `docker logs wordpress`; usually `init.sh` exited before reaching `exec php-fpm7.4 -F`. Confirm the socket with `docker exec nginx getent hosts wordpress`.
+**`502 Bad Gateway`.** php-fpm is not answering on `wordpress:9000`. Check `docker logs wordpress`; usually `init.sh` exited before reaching its final `exec`. Two checks worth running:
+
+```bash
+docker exec wordpress find /usr/sbin -maxdepth 1 -name 'php-fpm*'   # the find must match something
+docker exec wordpress grep -r '^listen' /etc/php/*/fpm/pool.d/      # must read listen = 9000
+```
+
+If the second prints a Unix socket path instead of `9000`, the `sed` in the dockerfile missed its target. Also confirm name resolution with `docker exec nginx getent hosts wordpress`.
 
 **Variables come out empty in `docker compose config`.** `srcs/.env` is missing or in the wrong directory. It has to sit next to `docker-compose.yml`.
 
