@@ -1,5 +1,5 @@
 #ignore passwords
 secrets/
-
+#ignore env files
 .env
-./srcs/.env
+
