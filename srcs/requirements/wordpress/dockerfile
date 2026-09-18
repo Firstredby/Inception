@@ -1,12 +1,13 @@
-FROM debian:bullseye
+FROM debian:bookworm
 
 RUN apt update && \
     apt install -y \
-    curl \
-    php7.4 \
-    php7.4-fpm \
-    php7.4-mysql \
-    mariadb-client
+        curl \
+        php \
+        php-fpm \
+        php-mysql \
+        mariadb-client && \
+    rm -rf /var/lib/apt/lists/*
     
 RUN curl -o latest.tar.gz https://wordpress.org/latest.tar.gz && \
     tar -xzf latest.tar.gz && rm latest.tar.gz
@@ -19,12 +20,13 @@ RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli
     && mv wp-cli.phar /usr/local/bin/wp
 
 #setting port on 9000
-RUN sed -i 's|listen = .*|listen = 9000|' \
-    /etc/php/7.4/fpm/pool.d/www.conf
+RUN sed -i 's|^listen = .*|listen = 9000|' \
+    /etc/php/*/fpm/pool.d/www.conf
 
 #less trash output
 RUN ln -s /bin/true /usr/sbin/sendmail
 
 COPY tools/init.sh /init.sh
 RUN chmod +x /init.sh
+
 ENTRYPOINT [ "/init.sh" ]
