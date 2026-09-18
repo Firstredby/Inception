@@ -83,7 +83,9 @@ Docker is what makes the "one service per container" requirement expressible at 
 
 **The certificate is generated at build time.** `create_cert.sh` runs inside the nginx `dockerfile`, producing a 2048-bit RSA self-signed certificate with `CN=ishchyro.42.fr`, valid for a year. It needs no runtime state and is therefore deterministic; the trade-off is that it only refreshes on rebuild, which is acceptable for a development certificate. nginx accepts TLSv1.2 and TLSv1.3 only, and port 80 is never published.
 
-**Credentials never enter the repository.** Passwords live in `secrets/`, names and emails live in `srcs/.env`, and both are gitignored. The `Makefile` runs a `check-secrets` target before anything else and refuses to build if any of the three secret files is absent *or empty*, listing exactly which ones.
+**Credentials never enter the repository.** Passwords live in `secrets/`, names and emails live in `srcs/.env`, and both are gitignored.
+
+**Configuration is validated before anything is built.** `make all` depends on two guard targets that run before the first `docker` command. `check-secrets` refuses to continue if any of the three secret files is absent or empty. `check-env` refuses if `srcs/.env` is missing, if any required variable is unset or empty, or if the values are internally inconsistent — `DB_NAME` not matching `MYSQL_DATABASE`, `DB_USER` not matching `MYSQL_USER`, `DB_HOST` not being the compose service name, or `WP_ADMIN` containing `admin`, which the subject forbids. Each check reports everything it found at once and exits non-zero, so a misconfiguration surfaces as a named list in a second rather than as a container looping on `Waiting for MariaDB...`.
 
 ---
 
@@ -232,7 +234,7 @@ Then open **https://ishchyro.42.fr** and accept the self-signed certificate warn
 
 | Target | What it does |
 |---|---|
-| `make` / `make all` | Verifies the secrets, creates the data directories, builds and starts everything detached |
+| `make` / `make all` | Runs `check-secrets` and `check-env`, creates the data directories, builds and starts everything detached |
 | `make up` | Starts in the foreground, logs on stdout |
 | `make down` | Stops and removes the containers |
 | `make logs` | Dumps logs from all services |

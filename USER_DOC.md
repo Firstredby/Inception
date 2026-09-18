@@ -192,6 +192,7 @@ Reload the site. Your posts should still be there. If they are not, the data dir
 | `502 Bad Gateway` | nginx is up but WordPress is not answering yet. Wait a few seconds on a first launch; if it persists, check `docker logs wordpress` |
 | Page loads but looks unstyled | nginx is serving, but the shared files are incomplete — check `docker logs wordpress` |
 | `docker ps` shows only two containers | One service failed to start; its logs will say why |
-| `make` stops with a message about missing secrets | One or more files in `secrets/` does not exist. See section 4 |
+| `make` stops with a message about missing secrets | One or more files in `secrets/` does not exist or is empty. See section 4 |
+| `make` stops with a message about `srcs/.env` | A required setting is missing or inconsistent. The message names each one; a developer should read section 4 of [DEV_DOC.md](DEV_DOC.md) |
 
 If a service is stuck, the first thing to try is `make down && make`. If that does not help, the problem is a configuration one and belongs in [DEV_DOC.md](DEV_DOC.md).

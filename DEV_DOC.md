@@ -128,9 +128,36 @@ WP_USER=ishchyro
 WP_USER_EMAIL=ishchyro@student.42.fr
 ```
 
-The database name and user are duplicated on purpose: MariaDB creates them, WordPress connects with them, and the two services read their own variables independently. Keep the pairs in sync or WordPress will hang trying to open a database that does not exist.
+The database name and user are duplicated on purpose: MariaDB creates them, WordPress connects with them, and the two services read their own variables independently. `DB_HOST` is the one value that is not free — it has to be `mariadb`, the service name in `docker-compose.yml`, because that is what Docker's embedded DNS resolves on the `inception` network.
 
 `$USER` is used by both the compose file (`/home/${USER}/data/...`) and the `Makefile`, but it comes from your shell, not from `.env`. Do not set it there.
+
+### The `check-env` guard
+
+Getting these wrong produces a symptom that is slow to diagnose: the WordPress container sits in its readiness loop printing `Waiting for MariaDB...`, nginx answers `502`, and none of the three containers logs anything that names the cause, because `init.sh` silences the connection attempt. `make all` therefore depends on a `check-env` target that runs before the first `docker` command.
+
+It performs three passes and reports everything it finds in each, rather than one failure per run:
+
+1. **The file.** If `srcs/.env` is absent it says so and suggests copying the template.
+2. **Presence.** Every name in `ENV_VARS` must resolve to a non-empty value. Missing and empty are treated alike. Copying `.env.example` without filling it in produces a list of eight.
+3. **Consistency.** `DB_NAME` must equal `MYSQL_DATABASE`; `DB_USER` must equal `MYSQL_USER`; `DB_HOST` must be exactly `mariadb`; and `WP_ADMIN` must not contain `admin`, tested case-insensitively, since the subject forbids it and an evaluator will check.
+
+```
+ERROR: DB_NAME must match MYSQL_DATABASE.
+ERROR: DB_USER must match MYSQL_USER.
+ERROR: DB_HOST must be 'mariadb' - the compose service name.
+
+Aborting.
+```
+
+Values are read with a small `get()` helper defined inside the recipe, which greps the assignment, takes the last occurrence and strips whitespace. It does **not** strip trailing comments, so `DB_HOST=mariadb # note` would fail the comparison. Put comments on their own line, as `.env.example` does.
+
+To run either guard without building:
+
+```bash
+make check-env
+make check-secrets
+```
 
 ---
 
@@ -194,10 +221,12 @@ The first build takes a few minutes: three Debian images, `apt` installs, the Wo
 
 | Target | What it runs | Effect |
 |---|---|---|
-| `make` / `make all` | `check-secrets`, `mkdir`, `up -d --build` | Verifies secrets, creates data directories, builds and starts detached |
+| `make` / `make all` | `check-secrets`, `check-env`, `mkdir`, `up -d --build` | Validates configuration, creates data directories, builds and starts detached |
 | `make up` | `up` | Foreground, logs on stdout |
 | `make down` | `down` | Stops and removes containers; data survives |
 | `make logs` | `logs` | Dumps logs from all services |
+| `make check-secrets` | — | Runs the secrets guard on its own |
+| `make check-env` | — | Runs the environment guard on its own |
 | `make clean` | `down` + `docker rm -f` / `rmi -f` on everything | Removes **all** containers and images on the host, then `chown`s the data directory back to you |
 | `make fclean` | `clean` + `rm -rf /home/$USER/data` | Destroys the database and the site |
 | `make re` | `fclean` + `all` | Full rebuild on an empty site |
@@ -447,7 +476,13 @@ Changes to `init.sh` and `setup.sh` only take effect on a rebuild, since both ar
 
 **`port is already allocated`.** Something on the host holds 443, often the host's own nginx or apache. `sudo lsof -i :443`, then stop it.
 
-**WordPress loops on `Waiting for MariaDB...`.** Either `DB_USER`/`DB_NAME` do not match `MYSQL_USER`/`MYSQL_DATABASE`, or `db_password.txt` is not the password the database was initialized with. MariaDB creates the database and user on the *very first* launch only — if you edited `.env` or a secret afterwards, the old data directory still holds the old credentials. `make fclean && make` starts clean, at the cost of all content.
+**WordPress loops on `Waiting for MariaDB...`.** `make check-env` first — it catches a mismatched `DB_NAME`/`DB_USER` and a wrong `DB_HOST` outright. If it passes, the remaining cause is the password: `db_password.txt` is not the one the database was initialized with. To see the actual error, which `init.sh` sends to `/dev/null`, run the connection by hand:
+
+```bash
+docker exec wordpress sh -c 'mariadb -h "$DB_HOST" -u "$DB_USER" -p"$(cat /run/secrets/db_password)" -e "SELECT 1;"'
+```
+
+`Unknown server host` means `DB_HOST`; `Access denied` means the user or the password; `Unknown database` means `DB_NAME`. MariaDB creates the database and user on the *very first* launch only — if you edited `.env` or a secret afterwards, the old data directory still holds the old credentials. `make fclean && make` starts clean, at the cost of all content.
 
 **`502 Bad Gateway`.** php-fpm is not answering on `wordpress:9000`. Check `docker logs wordpress`; usually `init.sh` exited before reaching its final `exec`. Two checks worth running:
 
