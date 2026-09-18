@@ -14,8 +14,17 @@ RUNTIME="/run/mysqld"
 DATADIR="/var/lib/mysql"
 SOCKET="${RUNTIME}/mysqld.sock"
 SECRET="/run/secrets/db_password"
+INIT_LOG="/tmp/mariadb-init.log"
 
 STARTUP_TIMEOUT=30
+
+abort_with_log() {
+    if [ -s "$INIT_LOG" ]; then
+        echo -e "${ERR}[FAIL]${RST} temporary server output:" >&2
+        sed 's/^/    /' "$INIT_LOG" >&2
+    fi
+    failure "$1"
+}
 
 #
 # Configuration
@@ -44,7 +53,7 @@ if [ ! -d "${DATADIR}/${MYSQL_DATABASE}" ]; then
         --user=mysql \
         --skip-networking \
         --socket="$SOCKET" \
-        >/dev/null 2>&1 &
+        >"$INIT_LOG" 2>&1 &
     PID=$!
 
     ready=0
@@ -54,12 +63,12 @@ if [ ! -d "${DATADIR}/${MYSQL_DATABASE}" ]; then
             break
         fi
         kill -0 "$PID" 2>/dev/null \
-            || failure "Temporary server exited during startup."
+            || abort_with_log "Temporary server exited during startup."
         sleep 1
     done
 
     [ "$ready" -eq 1 ] \
-        || failure "Temporary server was not ready within ${STARTUP_TIMEOUT}s."
+        || abort_with_log "Temporary server was not ready within ${STARTUP_TIMEOUT}s."
 
     success "Temporary server is ready."
 
