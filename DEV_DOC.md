@@ -54,7 +54,7 @@ sudo usermod -aG docker $USER   # log out and back in afterwards
         │   └── tools/init.sh
         └── mariadb/
             ├── dockerfile
-            ├── config/50-server.cnf   # kept for reference; not copied into the image
+            ├── config/99-inception.cnf   # bind-address, copied in over the packaged defaults
             └── tools/setup.sh
 ```
 
@@ -227,11 +227,9 @@ The first build takes a few minutes: three Debian images, `apt` installs, the Wo
 | `make logs` | `logs` | Dumps logs from all services |
 | `make check-secrets` | — | Runs the secrets guard on its own |
 | `make check-env` | — | Runs the environment guard on its own |
-| `make clean` | `down` + `docker rm -f` / `rmi -f` on everything | Removes **all** containers and images on the host, then `chown`s the data directory back to you |
-| `make fclean` | `clean` + `rm -rf /home/$USER/data` | Destroys the database and the site |
+| `make clean` | `down --rmi all --remove-orphans` | Removes this project's containers and images, then `chown`s the data directory back to you. Data survives |
+| `make fclean` | `down --rmi all --volumes --remove-orphans` + `rm -rf /home/$USER/data` | Same, plus the volume objects and the data itself. Destroys the database and the site |
 | `make re` | `fclean` + `all` | Full rebuild on an empty site |
-
-> `clean` deliberately removes every container and image on the machine, not just this project's. Convenient inside the 42 VM, destructive anywhere else.
 
 ### Working with Compose directly
 
@@ -407,7 +405,7 @@ browser ──443/TLS──> nginx ──FastCGI, wordpress:9000──> php-fpm 
 
 One user-defined bridge, `inception`. Unlike the default bridge, a user-defined network gets Docker's embedded DNS, so containers resolve each other by service name — which is why `DB_HOST=mariadb` and `fastcgi_pass wordpress:9000` need no hardcoded addresses and survive a container getting a new IP.
 
-Only nginx publishes a port. MariaDB and php-fpm are reachable from inside `inception` and from nowhere else; no firewall rule is involved, because the ports were never published. MariaDB is nevertheless configured with `bind-address = 0.0.0.0` — patched with `sed` in its dockerfile — because it must accept connections from another container, not just from its own loopback. The network boundary, not the bind address, is what keeps it private.
+Only nginx publishes a port. MariaDB and php-fpm are reachable from inside `inception` and from nowhere else; no firewall rule is involved, because the ports were never published. MariaDB is nevertheless configured with `bind-address = 0.0.0.0` — set in `config/99-inception.cnf`, which the dockerfile copies into `/etc/mysql/mariadb.conf.d/` — because it must accept connections from another container, not just from its own loopback. The network boundary, not the bind address, is what keeps it private.
 
 ### The three entrypoints
 
@@ -425,7 +423,9 @@ exec "$(find /usr/sbin -maxdepth 1 -name 'php-fpm*' -type f -executable | head -
 
 Debian names the binary after the version — `php-fpm8.2` on bookworm — so the `find` is what keeps the script working across base releases. `-F` keeps php-fpm in the foreground; without it the daemon would fork away and the container would exit.
 
-**mariadb.** The dockerfile installs server and client and patches `bind-address` in the packaged `/etc/mysql/mariadb.conf.d/50-server.cnf`. At run time `setup.sh` prepares `/run/mysqld`, and if `/var/lib/mysql/$MYSQL_DATABASE` does not exist it treats this as a first launch: it starts a temporary `mariadbd` with `--skip-networking` on a local socket, waits for it to answer, creates the database and the application user, shuts it down cleanly with `mariadb-admin shutdown`, and only then `exec`s the real server. The half-configured database is never reachable over the network. On later launches the whole block is skipped.
+**mariadb.** The dockerfile installs server and client and copies `config/99-inception.cnf` into `/etc/mysql/mariadb.conf.d/`. Debian reads that directory in alphabetical order, so a `99-` file overrides the packaged `50-server.cnf` without replacing it — the distribution defaults stay intact, and nothing depends on how a particular package version happens to format a line.
+
+At run time `setup.sh` first checks its inputs: the `db_password` secret must exist and be non-empty, and `MYSQL_DATABASE` and `MYSQL_USER` must be set. A missing input fails immediately through a `failure()` helper rather than producing a confusing error further down. It then prepares `/run/mysqld`, and if `/var/lib/mysql/$MYSQL_DATABASE` does not exist it treats this as a first launch: it starts a temporary `mariadbd` with `--skip-networking` on a local socket, waits up to `STARTUP_TIMEOUT` seconds for it to answer — aborting early if the process dies instead of waiting out the timeout — creates the database and the application user, shuts it down with `mariadb-admin shutdown`, and only then `exec`s the real server. Every step reports its own failure by name. The half-configured database is never reachable over the network. On later launches the whole block is skipped.
 
 ### Start-up order
 

@@ -57,7 +57,7 @@ Two commands delete things permanently. Read this before using either.
 
 | Command | What it removes |
 |---|---|
-| `make clean` | Stops the stack, then removes **every** Docker container and image on the machine — not only this project's. Your site data survives. |
+| `make clean` | Stops the stack and removes this project's containers and images. Your site data survives. |
 | `make fclean` | Everything `make clean` does, **plus** deletes `/home/<your-user>/data`. This erases the database and the entire WordPress installation. Every post, page, upload, user and setting is gone. |
 | `make re` | `make fclean` followed by `make` — a rebuild from nothing, on an empty site. |
 

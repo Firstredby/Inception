@@ -55,8 +55,8 @@ Docker is what makes the "one service per container" requirement expressible at 
         │   ├── dockerfile         # php-fpm, WordPress tarball, wp-cli
         │   └── tools/init.sh      # waits for the DB, installs WP, execs php-fpm
         └── mariadb/
-            ├── dockerfile         # mariadb-server, bind-address patched with sed
-            ├── config/50-server.cnf   # kept for reference; not copied into the image
+            ├── dockerfile         # mariadb-server + client
+            ├── config/99-inception.cnf   # bind-address, copied in over the packaged defaults
             └── tools/setup.sh     # first-run database and user creation, execs mariadbd
 ```
 
@@ -238,11 +238,9 @@ Then open **https://ishchyro.42.fr** and accept the self-signed certificate warn
 | `make up` | Starts in the foreground, logs on stdout |
 | `make down` | Stops and removes the containers |
 | `make logs` | Dumps logs from all services |
-| `make clean` | `down`, then removes **all** containers and images on the machine and fixes ownership of the data directory |
-| `make fclean` | `clean`, then deletes `/home/$USER/data` — **destroys the database and the site** |
+| `make clean` | Stops the stack and removes this project's containers and images, then fixes ownership of the data directory. Site data survives |
+| `make fclean` | Same, plus removes the volume objects and deletes `/home/$USER/data` — **destroys the database and the site** |
 | `make re` | `fclean` + `all`, a full rebuild from zero |
-
-> `clean` removes every container and image on the host, not only this project's. That is convenient inside the 42 VM and destructive anywhere else.
 
 ### Verifying
 
