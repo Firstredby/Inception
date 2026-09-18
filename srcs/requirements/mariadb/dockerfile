@@ -1,12 +1,12 @@
 FROM debian:bookworm
 
-RUN apt update && \
-    apt install -y \
+RUN apt-get update && \
+    apt-get install -y \
     mariadb-server \
-    mariadb-client
+    mariadb-client && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN sed -i 's/^bind-address.*/bind-address = 0.0.0.0/' \
-    /etc/mysql/mariadb.conf.d/50-server.cnf
+COPY config/99-inception.cnf /etc/mysql/mariadb.conf.d/99-inception.cnf
 
 COPY tools/setup.sh /setup.sh
 RUN chmod +x /setup.sh
